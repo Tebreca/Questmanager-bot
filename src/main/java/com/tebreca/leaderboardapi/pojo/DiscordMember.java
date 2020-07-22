@@ -3,6 +3,7 @@ package com.tebreca.leaderboardapi.pojo;
 import org.bson.types.ObjectId;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
+import org.springframework.data.mongodb.core.mapping.Field;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -13,11 +14,14 @@ public class DiscordMember {
     @Id
     ObjectId id = new ObjectId();
 
-    final Long discordID;
+    @Field
+    private final Long discordID;
 
-    Question[] answered;
+    @Field
+    private Question[] answered;
 
-    Question[] asked;
+    @Field
+    private Question[] asked;
 
     public DiscordMember(Long id, Question[] answered, Question[] asked) {
         this.discordID = id;

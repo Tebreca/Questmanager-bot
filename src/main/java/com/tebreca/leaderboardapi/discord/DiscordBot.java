@@ -94,7 +94,7 @@ public class DiscordBot extends ListenerAdapter {
     }
 
 
-    private void updateDB() {
+    private synchronized void updateDB() {
         LeaderboardApiApplication application = LeaderboardApiApplication.APPLICATION;
         assert application != null;
         MongoOperations operations = application.getOperations();
@@ -109,7 +109,7 @@ public class DiscordBot extends ListenerAdapter {
             guild.getMembers().stream().map(Member::getIdLong).filter(l ->!ids.contains(l)).forEach(newUsers::add);
         }
         System.out.printf("found these new members; %s \n", Arrays.toString(newUsers.toArray()));
-        newUsers.stream().map(DiscordMember::new).forEach(operations::save);
-        //System.out.printf("%s entries in db!", operations.findAll(DiscordMember.class).size());
+        newUsers.stream().map(DiscordMember::new).forEach(discordMember -> operations.save(discordMember, "discordMembers"));
+        System.out.printf("%s entries in db!", operations.findAll(DiscordMember.class).size());
     }
 }
