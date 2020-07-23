@@ -1,18 +1,35 @@
 package com.tebreca.leaderboardapi.pojo;
 
-import java.util.List;
-import java.util.Map;
-
 public class Question {
 
     /** key = question, value = description/answer */
-    List<Map.Entry<String, String>> description;
+    private String questionContents;
 
-    public List<Map.Entry<String, String>> getDescription() {
-        return description;
+    private Long userID;
+
+    public void setQuestionContents(String questionContents) {
+        this.questionContents = questionContents;
     }
 
-    public Question(List<Map.Entry<String, String>> description) {
-        this.description = description;
+    public Long getUserID() {
+        return userID;
     }
+
+    public void setUserID(Long userID) {
+        this.userID = userID;
+    }
+
+    public String getQuestionContents() {
+        return questionContents;
+    }
+
+    public Question(String questionContents, Long userID) {
+        this.questionContents = questionContents;
+        this.userID = userID;
+    }
+
+    public Question(){
+        this("", -1L);
+    }
+
 }

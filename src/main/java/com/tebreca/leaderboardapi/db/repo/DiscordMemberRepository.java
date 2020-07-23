@@ -10,7 +10,7 @@ import java.util.Optional;
 public interface DiscordMemberRepository extends MongoRepository<DiscordMember, Long> {
 
 
-    Optional<DiscordMember> findByDiscordID(Long aLong);
+    Optional<DiscordMember> findByDiscordID(Long id);
 
-
+    Optional<DiscordMember> findByNameAndTag(String name, String tag);
 }
