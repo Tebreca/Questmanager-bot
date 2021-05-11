@@ -1,8 +1,12 @@
 package com.tebreca.leaderboardapi;
 
+import com.tebreca.leaderboardapi.api.WebHandler;
 import com.tebreca.leaderboardapi.db.MongoManager;
 import com.tebreca.leaderboardapi.discord.DiscordBot;
 import de.codecentric.boot.admin.server.config.EnableAdminServer;
+import org.apache.juli.logging.LogFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
@@ -20,6 +24,11 @@ public class LeaderboardApiApplication {
 
 
     public static LeaderboardApiApplication APPLICATION = null;
+
+    @Autowired
+    WebHandler webHandler = null;
+
+    public Logger logger = LoggerFactory.getLogger(LeaderboardApiApplication.class);
 
     Timer scheduler = new Timer();
 
@@ -56,7 +65,8 @@ public class LeaderboardApiApplication {
     public void init(){
         this.bot = DiscordBot.init();
         bot.updateDB();
-        scheduler.scheduleAtFixedRate(new Runner(), 100L, 3600000L);
+        scheduler.scheduleAtFixedRate(new Runner(), 100L, 60000L);
+        webHandler.setApi(bot.getApi());
     }
 
     private class Runner extends TimerTask {

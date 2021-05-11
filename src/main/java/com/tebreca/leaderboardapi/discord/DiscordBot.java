@@ -3,13 +3,18 @@ package com.tebreca.leaderboardapi.discord;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.tebreca.leaderboardapi.LeaderboardApiApplication;
+import com.tebreca.leaderboardapi.db.MongoManager;
 import com.tebreca.leaderboardapi.db.repo.DiscordMemberRepository;
 import com.tebreca.leaderboardapi.pojo.DiscordMember;
 import com.tebreca.leaderboardapi.pojo.Question;
 import com.tebreca.leaderboardapi.pojo.ServerConfig;
+import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
+import net.dv8tion.jda.api.MessageBuilder;
 import net.dv8tion.jda.api.entities.*;
+import net.dv8tion.jda.api.events.guild.member.GuildMemberJoinEvent;
+import net.dv8tion.jda.api.events.guild.member.GuildMemberRemoveEvent;
 import net.dv8tion.jda.api.events.message.MessageUpdateEvent;
 import net.dv8tion.jda.api.events.message.guild.GuildMessageReceivedEvent;
 import net.dv8tion.jda.api.events.message.guild.react.GuildMessageReactionAddEvent;
@@ -29,26 +34,45 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.time.OffsetDateTime;
 import java.time.Period;
-import java.time.temporal.TemporalAmount;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.TimerTask;
+import java.util.*;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import static com.tebreca.leaderboardapi.LeaderboardApiApplication.APPLICATION;
+
 
 public class DiscordBot extends ListenerAdapter {
+
 
     public static final Gson GSON = new GsonAutoConfiguration().gson(new GsonBuilder());
 
     private final JDA api;
     private final ServerConfig config;
 
+    @Override
+    public void onGuildMemberJoin(@Nonnull GuildMemberJoinEvent event) {
+        User user = event.getMember().getUser();
+        if (!user.isBot()) {
+            APPLICATION.getDataManager().memberRepository.save(DiscordMember.fromUser(user));
+        }
+        super.onGuildMemberJoin(event);
+    }
+
+    @Override
+    public void onGuildMemberRemove(@Nonnull GuildMemberRemoveEvent event) {
+        User user = event.getMember().getUser();
+        if (!user.isBot()) {
+            DiscordMemberRepository repository = APPLICATION.getDataManager().memberRepository;
+            repository.delete(repository.findByDiscordID(user.getIdLong()).orElse(DiscordMember.fromUser(user)));
+        }
+        super.onGuildMemberRemove(event);
+    }
+
     private DiscordBot(ServerConfig config) throws LoginException, InterruptedException {
         this.config = config;
         JDABuilder jdaBuilder = JDABuilder.create(config.getAPI_KEY(),//
                 GatewayIntent.GUILD_MEMBERS,//
                 GatewayIntent.DIRECT_MESSAGES,//
-                GatewayIntent.DIRECT_MESSAGE_REACTIONS,//
                 GatewayIntent.GUILD_MESSAGE_REACTIONS,//
                 GatewayIntent.GUILD_MESSAGES//
         );
@@ -62,7 +86,8 @@ public class DiscordBot extends ListenerAdapter {
     public void onGuildMessageReceived(@Nonnull GuildMessageReceivedEvent event) {
         TextChannel channel = event.getChannel();
         String channelName = channel.getName();
-        String message = event.getMessage().getContentRaw();
+        Message eventMessage = event.getMessage();
+        String message = eventMessage.getContentRaw();
         List<String> problemsChannelNames = Arrays.asList(config.getProblemChannelNames());
         List<String> questions = Arrays.asList(config.getQuestions());
 
@@ -70,18 +95,18 @@ public class DiscordBot extends ListenerAdapter {
 
             //check if message is correct
             if (!questions.stream().map(message::contains).reduce(Boolean::logicalAnd).orElse(true)) {
-                badProblem(event.getMessage(), Problem.MISSING_QUESTION);
+                badProblem(eventMessage, Problem.MISSING_QUESTION);
             } else if (message.contains("@")) {
-                badProblem(event.getMessage(), Problem.MENTION);
+                badProblem(eventMessage, Problem.MENTION);
             } else if (message.length() > 1500) {
-                badProblem(event.getMessage(), Problem.TOO_LONG);
+                badProblem(eventMessage, Problem.TOO_LONG);
             } else {
-                DiscordMember discordMember = LeaderboardApiApplication.APPLICATION.getDataManager().memberRepository.findByDiscordID(event.getAuthor().getIdLong()).orElse(null);
+                DiscordMember discordMember = APPLICATION.getDataManager().memberRepository.findByDiscordID(event.getAuthor().getIdLong()).orElse(null);
                 if (discordMember != null) {
                     List<Question> list = new ArrayList<>(Arrays.asList(discordMember.getAsked()));
-                    list.add(new Question(message, event.getAuthor().getIdLong()));
+                    list.add(new Question(message, event.getAuthor().getIdLong(), eventMessage.getIdLong()));
                     discordMember.setAsked(list.toArray(new Question[0]));
-                    LeaderboardApiApplication.APPLICATION.getDataManager().memberRepository.save(discordMember);
+                    APPLICATION.getDataManager().memberRepository.save(discordMember);
                 }
             }
         }
@@ -104,56 +129,64 @@ public class DiscordBot extends ListenerAdapter {
         super.onPrivateMessageReceived(event);
     }
 
-    @Override
-    public void onPrivateMessageReactionAdd(@Nonnull PrivateMessageReactionAddEvent event) {
-        if (event.getReactionEmote().getEmoji().equals("✅") && !event.getUser().isBot()) {
-            Message msg = event.getChannel().retrieveMessageById(event.getMessageId()).complete();
-            String msgLink = Arrays.stream(msg.getContentDisplay().split("\n")).filter(s -> s.contains("https://discordapp.com/channels/")).findFirst().orElse("https://discordapp.com/channels/").substring(32);
-            String[] strings = msgLink.split("/");
-            String guildId = strings[0];
-            String channelId = strings[1];
-            String msgId = strings[2];
-            TextChannel channel = ((TextChannel) api.getGuildById(guildId).getGuildChannelById(channelId));
-            String contentRaw = channel.retrieveMessageById(msgId).complete().getContentRaw();
-            channel.deleteMessageById(msgId).queue();
-            DiscordMemberRepository discordMemberRepository = LeaderboardApiApplication.APPLICATION.getDataManager().memberRepository;
-            DiscordMember member = discordMemberRepository.findByDiscordID(event.getUserIdLong()).orElse(null);
-            if (member == null) {
-                return;
-            }
-            Question question = Arrays.stream(member.getAsked()).filter(q -> q.getQuestionContents().equals(contentRaw)).findAny().orElse(new Question(contentRaw, event.getUserIdLong()));
-            String[] nameAndTag = msg.getContentRaw().split("#");
-            DiscordMember discordMember = discordMemberRepository.findByNameAndTag(nameAndTag[0], nameAndTag[1].substring(0, 4)).orElse(null);
-            if (discordMember == null || discordMember.getDiscordID().equals(member.getDiscordID())) {
-                event.getChannel().deleteMessageById(event.getMessageId()).queue();
-                return;
-            }
-            List<Question> questions = new ArrayList<>();
-            questions.addAll(Arrays.asList(discordMember.getAnswered()));
-            questions.add(question);
-            discordMember.setAnswered(questions.toArray(new Question[0]));
-            event.getChannel().deleteMessageById(event.getMessageId()).queue();
-        }
-    }
 
     @Override
     public void onGuildMessageReactionAdd(@Nonnull GuildMessageReactionAddEvent event) {
         TextChannel channel = event.getChannel();
         String channelName = channel.getName();
         List<String> problemsChannelNames = Arrays.asList(config.getProblemChannelNames());
-        if (problemsChannelNames.contains(channelName) && event.getReactionEmote().getEmoji().equals("✅")) {
-            Message message = event.getChannel().retrieveMessageById(event.getMessageId()).complete();
-            StringBuilder msg = new StringBuilder();
-            msg.append(String.format("%s marked your problem as solved; \n \n", event.getUser().getAsTag()));
-            msg.append("https://discordapp.com/channels/");
-            msg.append(event.getGuild().getId()).append('/');
-            msg.append(channel.getId()).append('/');
-            msg.append(message.getId());
-            msg.append("\n \nIs this correct? If not, just ignore this message and nothing will happen!");
-            PrivateChannel privateChannel = message.getAuthor().openPrivateChannel().complete();
-            privateChannel.sendMessage(msg)//
-                    .queue(message1 -> privateChannel.addReactionById(message1.getId(), "✅").queue());
+        if(!event.getReactionEmote().getEmoji().equals("✅")){
+            return;
         }
+        Message message = event.getChannel().retrieveMessageById(event.getMessageId()).complete();
+        if (problemsChannelNames.contains(channelName)) {
+            if(!event.getUser().equals(message.getAuthor())){
+                MessageBuilder messageBuilder = new MessageBuilder();
+                EmbedBuilder builder = new EmbedBuilder();
+                builder.setTitle("Problem marked as solved", message.getJumpUrl());
+                builder.setDescription("Hello " + message.getAuthor().getAsMention() + " " + event.getUser().getAsMention() + " has marked your problem as solved by them! If they did indeed solve your issue, then react to this message with ✅");
+                messageBuilder.setEmbed(builder.build());
+                sendToBotSpam(messageBuilder.build());
+            }
+        } else if(channelName.toLowerCase().contains("bot-spam") && message.getAuthor().getIdLong() == 734848876481085521L){
+            Optional<MessageEmbed> embedOptional = message.getEmbeds().stream().findFirst();
+            if(!embedOptional.isPresent()){
+                return;
+            }
+            MessageEmbed embed = embedOptional.get();
+            String embedUrl = embed.getUrl();
+            String embedDescription = embed.getDescription();
+            List<String> mentions = Arrays.stream(embedDescription.split(" ")).filter(s -> s.contains("@")).collect(Collectors.toUnmodifiableList());
+            Guild guild = channel.getGuild();
+            User owner =  Objects.requireNonNull(guild.getMemberById(mentions.get(0).substring(2, mentions.get(0).length() - 2))).getUser();
+            User solver = Objects.requireNonNull(guild.getMemberById(mentions.get(1).substring(2, mentions.get(1).length() - 2))).getUser();
+            assert embedUrl != null;
+            embedUrl = embedUrl.replace("https://discord.com/channels/", "");
+            String[] ids = embedUrl.split("/");
+            String guildID = ids[0];//unused; just for clarity
+            String channelID = ids[1];
+            String messageID = ids[2];
+            MongoManager manager = APPLICATION.getDataManager();
+            Optional<DiscordMember> ownerOptional = manager.memberRepository.findByDiscordID(owner.getIdLong());
+            Optional<DiscordMember> solverOptional = manager.memberRepository.findByDiscordID(solver.getIdLong());
+            if(ownerOptional.isEmpty() || solverOptional.isEmpty()) {
+                return;
+            }
+            DiscordMember ownerMember = ownerOptional.get();
+            DiscordMember solverMember = solverOptional.get();
+            Question question = ownerMember.getAskedByMessageId(Long.parseLong(messageID)).orElseThrow();
+            List<Question> answered = new ArrayList<>(Arrays.asList(solverMember.getAnswered()));
+            answered.add(question);
+            solverMember.setAnswered(answered.toArray(Question[]::new));
+            manager.memberRepository.save(solverMember);
+            Objects.requireNonNull(channel.getGuild().getTextChannelById(channelID)).deleteMessageById(messageID).queue();
+        }
+    }
+
+    private void sendToBotSpam(Message message) {
+        api.getGuilds().stream().map(Guild::getChannels).map(Collection::stream).reduce(Stream::concat).orElse(Stream.empty()).filter(guildChannel -> guildChannel.getName().equals("bot-spam")).map(guildChannel -> (MessageChannel) guildChannel).forEach(
+                channel -> channel.sendMessage(message).queue()
+        );
     }
 
     @Override
@@ -200,7 +233,7 @@ public class DiscordBot extends ListenerAdapter {
     }
 
     public void updateDB() {
-        LeaderboardApiApplication application = LeaderboardApiApplication.APPLICATION;
+        LeaderboardApiApplication application = APPLICATION;
         assert application != null;
         MongoOperations operations = application.getOperations();
 
@@ -213,22 +246,36 @@ public class DiscordBot extends ListenerAdapter {
                 .map(Guild::getMembers)
                 .flatMap(List::stream)
                 .filter(l -> !ids.contains(l.getIdLong()))
+                .filter(l -> !l.getUser().isBot())
                 .collect(Collectors.toList());
         newUsers.stream().map(Member::getUser).map(DiscordMember::fromUser).forEach(operations::insert);
     }
 
     public void purgeOldMessages() {
+        APPLICATION.logger.info("purging!");
         api.getGuilds().forEach(this::purgeOldMessages);
     }
 
     private void purgeOldMessages(Guild guild) {
         List<String> problemsChannelNames = Arrays.asList(config.getProblemChannelNames());
-        guild.getChannels().stream().filter(channel -> problemsChannelNames.contains(channel.getName())).map(c -> ((TextChannel) c)).forEach(this::purgeOldMessages);
+        guild.getTextChannels().stream().filter(channel -> problemsChannelNames.contains(channel.getName())).forEach(this::purgeOldMessages);
     }
 
     private void purgeOldMessages(TextChannel channel) {
         OffsetDateTime _10daysbefore = OffsetDateTime.now().minus(Period.ofDays(10));
-        channel.getHistory().getRetrievedHistory().stream().filter((Message m) -> m.getTimeCreated().isBefore(_10daysbefore)).filter(m->!m.isPinned()).map(Message::getId).forEach(l-> channel.deleteMessageById(l).queue());
+        //       channel.getHistory().getRetrievedHistory().stream().filter((Message m) -> m.getTimeCreated().isBefore(_10daysbefore)).filter(m->!m.isPinned()).map(Message::getId).forEach(l-> channel.deleteMessageById(l).queue());
+        List<Message> history = channel.getHistoryFromBeginning(10).complete().getRetrievedHistory();
+            history.stream().filter((Message m) -> m.getTimeCreated().isBefore(_10daysbefore)).filter(m -> !m.isPinned()).map(Message::getId).forEach(l -> {
+                try {
+                    channel.deleteMessageById(l).queue();
+                } catch (Exception e){
+                    APPLICATION.logger.warn("error when deleting message of id " + l , e);
+                }
+            });
     }
 
+
+    public JDA getApi() {
+        return api;
+    }
 }

@@ -1,6 +1,8 @@
 package com.tebreca.leaderboardapi.db.repo;
 
 import com.tebreca.leaderboardapi.pojo.DiscordMember;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.data.repository.CrudRepository;
 import org.springframework.data.repository.Repository;
@@ -13,4 +15,8 @@ public interface DiscordMemberRepository extends MongoRepository<DiscordMember, 
     Optional<DiscordMember> findByDiscordID(Long id);
 
     Optional<DiscordMember> findByNameAndTag(String name, String tag);
+
+    Page<DiscordMember> findAllByOrderByAnsweredDesc(Pageable pageable);
+
+
 }

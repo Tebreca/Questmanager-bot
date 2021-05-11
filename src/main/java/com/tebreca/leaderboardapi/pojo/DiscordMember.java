@@ -1,11 +1,13 @@
 package com.tebreca.leaderboardapi.pojo;
 
-import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.User;
 import org.bson.types.ObjectId;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
+
+import java.util.Arrays;
+import java.util.Optional;
 
 @Document
 public class DiscordMember {
@@ -31,6 +33,10 @@ public class DiscordMember {
 
     @Field
     private String tag;
+
+    public Optional<Question> getAskedByMessageId(Long messageID){
+        return Arrays.stream(asked).filter(question -> question.getMessageId().equals(messageID)).findAny();
+    }
 
     public void setDiscordID(Long discordID) {
         this.discordID = discordID;
